@@ -106,10 +106,10 @@
     <div style="height:18px"></div>
     <div class="split">
       <div>
-        <h2>Ganancia (P&amp;L)</h2>
+        <h2>Ganancia</h2>
         <div class="card" id="pnlBox"></div>
         <div class="hint" style="margin-top:14px">
-          Tu <b>ganancia</b> es distinta a lo que cargan los clientes. Lo que el cliente manda y vos fondeás a publicistas es <b>plata del cliente</b> (no es tu gasto ni tu ganancia). Tu ganancia sale de: comisiones + Pillín − costo de mensajes − gastos. Los <b>retiros</b> con Tomi se descuentan de la ganancia acumulada.
+          Tu <b>ganancia</b> = ingresos − egresos (gastos), en USDT y ARS por separado. Los <b>retiros</b> NO afectan la ganancia: se registran aparte. En la solapa <b>Caja</b> ves la <b>plata actual</b> (ganancia − retiros), o sea lo que debería quedar disponible.
         </div>
       </div>
       <div>
@@ -128,7 +128,10 @@
       <button class="btn sm" onclick="openCajaMov('ingreso')">+ Ingreso</button>
       <button class="btn ghost sm" onclick="openCajaMov('egreso')">+ Egreso</button>
     </div>
-    <div class="hint">Tu libro de caja igual que tu planilla: cada ingreso y egreso en USDT o ARS, con totales y cierre mensual (profit = ingresos − egresos por moneda). Filtrá por mes arriba a la derecha.</div>
+    <div class="hint">Arriba: la <b>plata actual</b> que debería haber ahora (ganancia histórica − retiros). Abajo: los movimientos del mes con su cierre. Filtrá por mes arriba a la derecha.</div>
+    <div class="sub-h">Plata actual · lo que debería haber</div>
+    <div class="grid cards" id="cajaActual"></div>
+    <div class="sub-h">Movimientos del mes</div>
     <div class="grid cards" id="cajaCards"></div>
     <div style="height:14px"></div>
     <div class="card" style="padding:0"><table id="tblCaja"></table></div>
@@ -203,13 +206,6 @@
     <div class="grid cards" id="retiroCards"></div>
     <div style="height:14px"></div>
     <div class="card" style="padding:0"><table id="tblRetiros"></table></div>
-  </section>
-
-  <!-- GASTOS -->
-  <section class="view" id="view-gastos">
-    <div class="toolbar"><h2 style="margin:0">Gastos operativos</h2><div class="spacer"></div><button class="btn sm" onclick="openGasto()">+ Nuevo gasto</button></div>
-    <div class="hint">BMs, APIs, bm2k y cualquier otro costo de la operación. Esto sí baja tu ganancia.</div>
-    <div class="card" style="padding:0"><table id="tblGastos"></table></div>
   </section>
 
   <!-- CONFIG -->
@@ -291,9 +287,10 @@ function changeCfg(){localStorage.removeItem('sb_cfg');location.reload();}
 function saveCfg(){const url=document.getElementById('sbUrl').value.trim();const key=document.getElementById('sbKey').value.trim();if(!url||!key){alert('Completá URL y key');return;}localStorage.setItem('sb_cfg',JSON.stringify({url,key}));initSupabase();}
 function setCloud(ok){const el=document.getElementById('cloudDot');if(el)el.textContent=ok?'☁ sincronizado':'⚠ sin conexión';}
 
+const DEFAULT_CFG={url:'https://rqykxhgzpilmgahyoogp.supabase.co',key:'sb_publishable_jeXq6FSxwq1QbKDRz4k5pA_UKY4uSoy'};
 async function initSupabase(){
   if(!window.supabase){setTimeout(initSupabase,300);return;}
-  const cfg=getCfg();if(!cfg){showSetup();return;}
+  const cfg=getCfg()||DEFAULT_CFG;
   try{sb=window.supabase.createClient(cfg.url,cfg.key);}catch(e){alert('Configuración inválida');showSetup();return;}
   try{const {data:{session}}=await sb.auth.getSession();if(!session){showAuth();return;}await afterLogin();}
   catch(e){showAuth();}
@@ -342,8 +339,8 @@ function seed(){
     ],
     ingresos:[], diaria:[], gastos:[],
     retiros:[
-      {id:uid(),fecha:"2026-07-16",monto:1000,nota:"MANU"},
-      {id:uid(),fecha:"2026-07-16",monto:1000,nota:"TOMI"}
+      {id:uid(),fecha:"2026-07-16",monto:1000,moneda:"USDT",nota:"MANU"},
+      {id:uid(),fecha:"2026-07-16",monto:1000,moneda:"USDT",nota:"TOMI"}
     ],
     caja:[
       {id:uid(),fecha:"2026-07-01",tipo:"ingreso",motivo:"bet ar + hamilton",usdt:200,ars:0},
@@ -407,19 +404,17 @@ function comisionCliente(cid,ini,fin){
   }
 }
 
-/* ---------------- P&L ---------------- */
+/* ---------------- Ganancia (desde la Caja) ---------------- */
 function pnl(){
-  let comisiones=0; db.clientes.forEach(c=>comisiones+=comisionCliente(c.id));
-  let pillin=0; db.diaria.forEach(e=>{ if(e.pillin) pillin+=(+e.montoUSD||0)*(db.config.dupPct/100); });
-  let costoMsj=0; db.diaria.forEach(e=>{const p=pub(entryPub(e));if(p)costoMsj+=(+e.msjEnv||0)*(+p.costoMsj||0);});
-  const gastos=db.gastos.reduce((s,g)=>s+(+g.monto||0),0);
-  const neta=comisiones+pillin-costoMsj-gastos;
-  const retirado=db.retiros.reduce((s,r)=>s+(+r.monto||0),0);
-  return {comisiones,pillin,costoMsj,gastos,neta,retirado,sinRetirar:neta-retirado};
+  let iU=0,iA=0,eU=0,eA=0;
+  db.caja.forEach(m=>{if(m.tipo==='ingreso'){iU+=+m.usdt||0;iA+=+m.ars||0;}else{eU+=+m.usdt||0;eA+=+m.ars||0;}});
+  let rU=0,rA=0;
+  db.retiros.forEach(r=>{if((r.moneda||'USDT')==='ARS')rA+=+r.monto||0;else rU+=+r.monto||0;});
+  return {ingU:iU,ingA:iA,egrU:eU,egrA:eA,profU:iU-eU,profA:iA-eA,retU:rU,retA:rA,sinU:iU-eU-rU,sinA:iA-eA-rA};
 }
 
 /* ---------------- nav ---------------- */
-const TABS=[["dash","Resumen"],["caja","Caja"],["clientes","Clientes"],["publicistas","Publicistas"],["diaria","Diaria"],["wallet","Wallet"],["rend","Rendimiento"],["cobro","Cobro semanal"],["retiros","Retiros"],["gastos","Gastos"],["config","Config"]];
+const TABS=[["dash","Resumen"],["caja","Caja"],["clientes","Clientes"],["publicistas","Publicistas"],["diaria","Diaria"],["wallet","Wallet"],["rend","Rendimiento"],["cobro","Cobro semanal"],["retiros","Retiros"],["config","Config"]];
 function buildNav(){document.getElementById('nav').innerHTML=TABS.map(([id,l],i)=>`<button data-v="${id}" class="${i===0?'active':''}" onclick="go('${id}')">${l}</button>`).join('');}
 function go(v){document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));document.getElementById('view-'+v).classList.add('active');renderAll();}
 
@@ -429,22 +424,18 @@ function renderDash(){
   db.clientes.forEach(c=>{const s=clienteStats(c.id);cargado+=s.cargado;invertido+=s.invertido;saldo+=s.saldo;});
   const p=pnl();
   document.getElementById('dashCards').innerHTML=[
-    ['Saldo total en clientes',money(saldo),'blu'],
-    ['Ganancia neta',money(p.neta),p.neta>=0?'pos':'neg'],
-    ['Sin retirar',money(p.sinRetirar),p.sinRetirar>=0?'pos':'neg'],
-    ['Total invertido en pauta',money(invertido),''],
+    ['Ganancia USDT',money(p.profU),p.profU>=0?'pos':'neg'],
+    ['Ganancia ARS',money(p.profA,'PES'),p.profA>=0?'pos':'neg'],
+    ['Saldo en clientes',money(saldo),'blu'],
+    ['Invertido en pauta',money(invertido),''],
     ['Clientes',db.clientes.length,'pur'],
     ['Publicistas',db.publicistas.length,'gold']
-  ].map(([l,v,c])=>`<div class="card"><div class="lbl">${l}</div><div class="val ${c}">${v}</div></div>`).join('');
+  ].map(([l,v,c])=>`<div class="card"><div class="lbl">${l}</div><div class="val small ${c}">${v}</div></div>`).join('');
 
   document.getElementById('pnlBox').innerHTML=`
-    <div class="pnl-line"><span>Comisiones a clientes</span><span class="pos">+ ${money(p.comisiones)}</span></div>
-    <div class="pnl-line"><span>Ganancia Pillín (duplicación)</span><span class="pos">+ ${money(p.pillin)}</span></div>
-    <div class="pnl-line"><span>Costo de mensajes (publicistas)</span><span class="neg">− ${money(p.costoMsj)}</span></div>
-    <div class="pnl-line"><span>Gastos operativos (BM/API/bm2k)</span><span class="neg">− ${money(p.gastos)}</span></div>
-    <div class="pnl-line total"><span>Ganancia neta</span><span class="${p.neta>=0?'pos':'neg'}">${money(p.neta)}</span></div>
-    <div class="pnl-line"><span>Retiros con Tomi</span><span class="neg">− ${money(p.retirado)}</span></div>
-    <div class="pnl-line total"><span>Sin retirar</span><span class="${p.sinRetirar>=0?'pos':'neg'}">${money(p.sinRetirar)}</span></div>`;
+    <div class="pnl-line"><span>Ingresos</span><span class="pos">${money(p.ingU)} · ${money(p.ingA,'PES')}</span></div>
+    <div class="pnl-line"><span>Egresos (gastos)</span><span class="neg">− ${money(p.egrU)} · ${money(p.egrA,'PES')}</span></div>
+    <div class="pnl-line total"><span>Ganancia</span><span class="${p.profU>=0?'pos':'neg'}">${money(p.profU)} · ${money(p.profA,'PES')}</span></div>`;
 
   const rows=db.clientes.map(c=>{const s=clienteStats(c.id);const pb=pub(c.pubId);
     return `<tr><td>${c.nombre}</td><td class="muted">${pb?pb.nombre:'—'}</td><td class="num">${money(s.cargado)}</td><td class="num">${money(s.invertido)}</td><td class="num ${s.saldo>=0?'pos':'neg'}">${money(s.saldo)}</td></tr>`;}).join('');
@@ -564,13 +555,15 @@ function renderCobro(){
 /* ---------------- retiros ---------------- */
 function renderRetiros(){
   const p=pnl();
+  const tc=db.config.tc||1;
+  const aUni=p.sinU+p.sinA/tc;
   document.getElementById('retiroCards').innerHTML=[
-    ['Ganancia neta acumulada',money(p.neta),p.neta>=0?'pos':'neg'],
-    ['Total retirado',money(p.retirado),'gold'],
-    ['Sin retirar (disponible)',money(p.sinRetirar),p.sinRetirar>=0?'pos':'neg']
-  ].map(([l,v,c])=>`<div class="card"><div class="lbl">${l}</div><div class="val small ${c}">${v}</div></div>`).join('');
-  const rows=[...db.retiros].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(r=>`<tr><td>${r.fecha}</td><td>${r.nota||'—'}</td><td class="num neg">${money(r.monto)}</td><td class="num"><button class="iconbtn" onclick="delRetiro('${r.id}')">🗑</button></td></tr>`).join('');
-  document.getElementById('tblRetiros').innerHTML=`<thead><tr><th>Fecha</th><th>Detalle</th><th class="num">Monto</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=4 class=empty>Sin retiros registrados</td></tr>'}</tbody>`;
+    ['Ganancia histórica',money(p.profU)+'<br><span style="font-size:13px">'+money(p.profA,'PES')+'</span>'],
+    ['Total retirado',money(p.retU)+'<br><span style="font-size:13px">'+money(p.retA,'PES')+'</span>'],
+    ['Plata actual (USDT unificado)','<span class="'+(aUni>=0?'pos':'neg')+'">'+money(aUni)+'</span><br><span class="muted" style="font-size:11px">'+money(p.sinU)+' + '+money(p.sinA,'PES')+'</span>']
+  ].map(([l,v])=>`<div class="card"><div class="lbl">${l}</div><div class="val small">${v}</div></div>`).join('');
+  const rows=[...db.retiros].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(r=>{const cur=(r.moneda==='ARS')?'PES':'USD';return `<tr><td>${r.fecha}</td><td>${r.nota||'—'}</td><td><span class="chip">${r.moneda||'USDT'}</span></td><td class="num neg">${money(r.monto,cur)}</td><td class="num"><button class="iconbtn" onclick="delRetiro('${r.id}')">🗑</button></td></tr>`;}).join('');
+  document.getElementById('tblRetiros').innerHTML=`<thead><tr><th>Fecha</th><th>Detalle</th><th>Moneda</th><th class="num">Monto</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=5 class=empty>Sin retiros registrados</td></tr>'}</tbody>`;
 }
 
 /* ---------------- gastos ---------------- */
@@ -582,6 +575,14 @@ function renderGastos(){
 
 /* ---------------- caja ---------------- */
 function renderCaja(){
+  const P=pnl();
+  const tc=db.config.tc||1;
+  const gUni=P.profU+P.profA/tc, rUni=P.retU+P.retA/tc, aUni=P.sinU+P.sinA/tc;
+  document.getElementById('cajaActual').innerHTML=[
+    ['Ganancia histórica (USDT)','<span class="'+(gUni>=0?'pos':'neg')+'">'+money(gUni)+'</span><br><span class="muted" style="font-size:11px">'+money(P.profU)+' + '+money(P.profA,'PES')+'</span>'],
+    ['Retiros (USDT)','<span class="gold">'+money(rUni)+'</span><br><span class="muted" style="font-size:11px">'+money(P.retU)+' + '+money(P.retA,'PES')+'</span>'],
+    ['Plata actual · debería haber','<span class="'+(aUni>=0?'pos':'neg')+'" style="font-size:19px">'+money(aUni)+'</span><br><span class="muted" style="font-size:11px">unificado @ TC '+tc.toLocaleString('es-AR')+'</span>']
+  ].map(([l,v])=>`<div class="card"><div class="lbl">${l}</div><div class="val small">${v}</div></div>`).join('');
   const mSel=document.getElementById('cajaMonth').value;
   let list=[...db.caja].sort((a,b)=>b.fecha.localeCompare(a.fecha)||(a.tipo>b.tipo?1:-1));
   if(mSel)list=list.filter(m=>m.fecha.slice(0,7)===mSel);
@@ -598,17 +599,22 @@ function renderCaja(){
     <td>${m.motivo||'—'}</td>
     <td class="num ${m.tipo==='ingreso'?'pos':'neg'}">${m.usdt?money(m.usdt):'—'}</td>
     <td class="num ${m.tipo==='ingreso'?'pos':'neg'}">${m.ars?money(m.ars,'PES'):'—'}</td>
-    <td class="num"><button class="iconbtn" onclick="delCaja('${m.id}')">🗑</button></td>
+    <td class="num"><button class="iconbtn" onclick="openCajaMov('','${m.id}')">✎</button><button class="iconbtn" onclick="delCaja('${m.id}')">🗑</button></td>
   </tr>`).join('');
   document.getElementById('tblCaja').innerHTML=`<thead><tr><th>Fecha</th><th>Tipo</th><th>Motivo</th><th class="num">USDT</th><th class="num">ARS</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=6 class=empty>Sin movimientos</td></tr>'}
     <tr><td colspan=3 style="font-weight:700">TOTALES (${mSel||'todo'})</td><td class="num" style="font-weight:700">${money(iU-eU)}</td><td class="num" style="font-weight:700">${money(iA-eA,'PES')}</td><td></td></tr></tbody>`;
 }
-function openCajaMov(tipo){openModal(`<h3>Nuevo ${tipo}</h3>
-  <div class="field"><label>Fecha</label><input id="mFecha" type="date" value="${today()}"></div>
-  <div class="field"><label>Motivo</label><input id="mMotivo" placeholder="comisión, api 2k, carga, etc."></div>
-  <div class="row2"><div class="field"><label>Moneda</label><select id="mMoneda"><option value="USDT">USDT</option><option value="ARS">ARS (pesos)</option></select></div><div class="field"><label>Monto</label><input id="mMonto" type="number" step="0.01"></div></div>
-  <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="saveCajaMov('${tipo}')">Guardar</button></div>`);}
-function saveCajaMov(tipo){const mon=val('mMoneda');const amt=+val('mMonto')||0;const o={id:uid(),fecha:val('mFecha'),tipo,motivo:val('mMotivo'),usdt:mon==='USDT'?amt:0,ars:mon==='ARS'?amt:0};if(!amt){alert('Poné el monto');return;}db.caja.push(o);save();closeModal();renderAll();}
+function openCajaMov(tipo,id){
+  const m=id?db.caja.find(x=>x.id===id):null;
+  const t=m?m.tipo:tipo;
+  const mon=m?(m.ars>0?'ARS':'USDT'):'USDT';
+  const amt=m?(m.ars>0?m.ars:m.usdt):'';
+  openModal(`<h3>${m?'Editar movimiento':'Nuevo '+t}</h3>
+  <div class="row2"><div class="field"><label>Fecha</label><input id="mFecha" type="date" value="${m?m.fecha:today()}"></div><div class="field"><label>Tipo</label><select id="mTipo"><option value="ingreso" ${t==='ingreso'?'selected':''}>ingreso</option><option value="egreso" ${t==='egreso'?'selected':''}>egreso</option></select></div></div>
+  <div class="field"><label>Motivo</label><input id="mMotivo" value="${m?(m.motivo||''):''}" placeholder="comisión, api 2k, carga, etc."></div>
+  <div class="row2"><div class="field"><label>Moneda</label><select id="mMoneda"><option value="USDT" ${mon==='USDT'?'selected':''}>USDT</option><option value="ARS" ${mon==='ARS'?'selected':''}>ARS (pesos)</option></select></div><div class="field"><label>Monto</label><input id="mMonto" type="number" step="0.01" value="${amt}"></div></div>
+  <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="saveCajaMov('${id||''}')">Guardar</button></div>`);}
+function saveCajaMov(id){const mon=val('mMoneda');const amt=+val('mMonto')||0;if(!amt){alert('Poné el monto');return;}const o={fecha:val('mFecha'),tipo:val('mTipo'),motivo:val('mMotivo'),usdt:mon==='USDT'?amt:0,ars:mon==='ARS'?amt:0};if(id){Object.assign(db.caja.find(x=>x.id===id),o);}else{o.id=uid();db.caja.push(o);}save();closeModal();renderAll();}
 function delCaja(id){if(confirm('¿Borrar movimiento?')){db.caja=db.caja.filter(m=>m.id!==id);save();renderAll();}}
 
 /* ---------------- modales ---------------- */
@@ -671,10 +677,10 @@ function delIngreso(id){if(confirm('¿Borrar ingreso?')){db.ingresos=db.ingresos
 
 function openRetiro(){openModal(`<h3>Nuevo retiro de ganancia</h3>
     <div class="field"><label>Fecha</label><input id="mFecha" type="date" value="${today()}"></div>
-    <div class="field"><label>Monto (USD)</label><input id="mMonto" type="number" step="0.01"></div>
-    <div class="field"><label>Detalle</label><input id="mNota" placeholder="Retiro Manu + Tomi, etc."></div>
+    <div class="row2"><div class="field"><label>Moneda</label><select id="mMoneda"><option value="USDT">USDT</option><option value="ARS">ARS (pesos)</option></select></div><div class="field"><label>Monto</label><input id="mMonto" type="number" step="0.01"></div></div>
+    <div class="field"><label>Detalle</label><input id="mNota" placeholder="Retiro Manu, Tomi, etc."></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="saveRetiro()">Guardar</button></div>`);}
-function saveRetiro(){const o={id:uid(),fecha:val('mFecha'),monto:+val('mMonto')||0,nota:val('mNota')};if(!o.monto){alert('Poné el monto');return;}db.retiros.push(o);save();closeModal();renderAll();}
+function saveRetiro(){const o={id:uid(),fecha:val('mFecha'),monto:+val('mMonto')||0,moneda:val('mMoneda'),nota:val('mNota')};if(!o.monto){alert('Poné el monto');return;}db.retiros.push(o);save();closeModal();renderAll();}
 function delRetiro(id){if(confirm('¿Borrar retiro?')){db.retiros=db.retiros.filter(r=>r.id!==id);save();renderAll();}}
 
 function openGasto(){openModal(`<h3>Nuevo gasto</h3>
@@ -699,7 +705,7 @@ function renderAll(){
   if(!db.caja)db.caja=[];
   fillSel(document.getElementById('fDiaCliente'),'Todos los clientes');
   fillSel(document.getElementById('fWalCliente'),'Todos los clientes');
-  renderDash();renderCaja();renderClientes();renderPubs();renderDiaria();renderWallet();renderRend();renderCobro();renderRetiros();renderGastos();loadConfig();
+  renderDash();renderCaja();renderClientes();renderPubs();renderDiaria();renderWallet();renderRend();renderCobro();renderRetiros();loadConfig();
 }
 initSupabase();
 </script>
