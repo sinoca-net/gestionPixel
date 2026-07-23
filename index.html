@@ -147,8 +147,10 @@
   <!-- PUBLICISTAS -->
   <section class="view" id="view-publicistas">
     <div class="toolbar"><h2 style="margin:0">Publicistas</h2><div class="spacer"></div><button class="btn sm" onclick="openPub()">+ Nuevo publicista</button></div>
-    <div class="hint">Costo por mensaje, conversión y rendimiento asegurados vs. reales. Ves cuántos mensajes debían meter, cuántos metieron, cuántos restan y qué conversión de cargas llevan.</div>
+    <div class="hint">Costo por mensaje, conversión y rendimiento asegurados vs. reales. El <b>DEBE</b> se sincroniza solo con lo que fondeaste (fondeo ÷ costo del msj). Abajo, el detalle de cuántos mensajes debe por cada cliente.</div>
     <div class="card" style="padding:0"><table id="tblPubs"></table></div>
+    <div class="sub-h">Detalle por cliente · mensajes que debe</div>
+    <div class="card" style="padding:0"><table id="tblPubDetalle"></table></div>
   </section>
 
   <!-- DIARIA / CAMPAÑAS -->
@@ -174,7 +176,9 @@
       <select id="fDiaCliente" onchange="renderDiaria()"><option value="">Todos los clientes</option></select>
       <button class="btn sm" onclick="openDiaria()">+ Nuevo cierre</button>
     </div>
-    <div class="hint">El cierre diario de cada cliente: qué publicista, <b>cuánto gastó</b> ese día (con moneda), los mensajes que <b>debe</b> meter, cuántos <b>metió</b> y las <b>cargas</b> (depósitos) que generó. La app calcula restantes y conversión. Marcá <b>Pillín</b> si es cuenta con duplicación: el 50% de lo gastado es ganancia inmediata. Lo que cargás a las cuentas va en la solapa <b>Fondeos</b>.</div>
+    <div class="hint">El cierre diario de cada cliente: ponés los <b>mensajes metidos</b> y las <b>cargas</b>, y la app te dice el <b>gasto</b> (mensajes × costo del publicista) o lo ponés <b>manual</b> (para vos y Santi, que el costo varía). Te muestra el <b>presupuesto sobrante</b>, la <b>conversión</b> y el <b>rendimiento</b>. Marcá <b>Pillín</b>: el 50% de lo gastado es ganancia inmediata.</div>
+    <div class="grid cards" id="diariaCards"></div>
+    <div style="height:14px"></div>
     <div class="card" style="padding:0"><table id="tblDiaria"></table></div>
   </section>
 
@@ -393,8 +397,10 @@ const cli=id=>db.clientes.find(c=>c.id===id);
 const ingresoUSD=x=> x.moneda==='USDT'? x.monto : (x.tc? x.monto/x.tc : 0);
 const entryPub=e=>{ if(e.pubId) return e.pubId; const c=cli(e.clienteId); return c?c.pubId:null; };
 function convColor(real,aseg){ if(!aseg)return ''; if(real>=aseg)return 'pos'; if(real>=aseg*0.8)return 'warn'; return 'neg'; }
-// gasto de un cierre diario, convertido a USD; soporta {gasto,moneda} o legacy {monto/montoUSD}
-function diaGasto(e){const tc=db.config.tc||1;const raw=(e.gasto!==undefined&&e.gasto!=='')?+e.gasto:(e.monto!==undefined?+e.monto:(+e.montoUSD||0));if(e.moneda){return e.moneda==='ARS'?(raw||0)/tc:(raw||0);}return raw||0;}
+// gasto de un cierre diario, convertido a USD. Auto = msjs metidos × costo del publicista; o manual {gasto,moneda}
+function diaGasto(e){const tc=db.config.tc||1;
+  if(e.gastoAuto){const p=pub(entryPub(e));const cm=p?+p.costoMsj||0:0;return (+e.msjEnv||0)*cm;}
+  const raw=(e.gasto!==undefined&&e.gasto!=='')?+e.gasto:(e.monto!==undefined?+e.monto:(+e.montoUSD||0));if(e.moneda){return e.moneda==='ARS'?(raw||0)/tc:(raw||0);}return raw||0;}
 // ganancia inmediata Pillín (50% de lo GASTADO), en USD
 function diaPillin(e){return e.pillin?diaGasto(e)*((db.config.dupPct||50)/100):0;}
 // monto de un fondeo (plata cargada a la cuenta), convertido a USD
@@ -405,22 +411,26 @@ function clienteStats(cid){
   const dia=db.diaria.filter(x=>x.clienteId===cid);
   const cargado=ing.reduce((s,x)=>s+ingresoUSD(x),0);
   const invertido=dia.reduce((s,x)=>s+diaGasto(x),0);
+  const fondeado=db.fondeos.filter(x=>x.clienteId===cid).reduce((s,x)=>s+fonMonto(x),0);
   const gainPillin=dia.reduce((s,x)=>s+diaPillin(x),0);
   const msjAsig=dia.reduce((s,x)=>s+(+x.msjAsig||0),0);
   const msjEnv=dia.reduce((s,x)=>s+(+x.msjEnv||0),0);
   const cargas=dia.reduce((s,x)=>s+(+x.cargas||0),0);
   const conv=msjEnv?cargas/msjEnv*100:0;
-  return {cargado,invertido,gainPillin,saldo:cargado-invertido,msjAsig,msjEnv,restan:msjAsig-msjEnv,cargas,conv};
+  return {cargado,invertido,fondeado,sobrante:fondeado-invertido,gainPillin,saldo:cargado-invertido,msjAsig,msjEnv,restan:msjAsig-msjEnv,cargas,conv};
 }
+// msjs a meter para un fondeo, según el costo del publicista
+function fonMsjDebe(f){const p=pub(entryPub(f));const cm=p?+p.costoMsj||0:0;return cm>0?Math.round(fonMonto(f)/cm):0;}
 function pubStats(pid){
+  const p=pub(pid);const cm=p?+p.costoMsj||0:0;
+  const fons=db.fondeos.filter(f=>entryPub(f)===pid);
+  const fondeado=fons.reduce((s,f)=>s+fonMonto(f),0);
+  const msjAsig=fons.reduce((s,f)=>s+fonMsjDebe(f),0);        // DEBE = suma de msj a meter de sus fondeos
   const dia=db.diaria.filter(e=>entryPub(e)===pid);
-  const p=pub(pid);
-  const fondeado=dia.reduce((s,x)=>s+diaGasto(x),0);
-  const msjAsig=dia.reduce((s,x)=>s+(+x.msjAsig||0),0);
   const msjEnv=dia.reduce((s,x)=>s+(+x.msjEnv||0),0);
   const cargas=dia.reduce((s,x)=>s+(+x.cargas||0),0);
   const conv=msjEnv?cargas/msjEnv*100:0;
-  const costoMsj=msjEnv*(p?+p.costoMsj:0);
+  const costoMsj=msjEnv*cm;
   return {fondeado,msjAsig,msjEnv,restan:msjAsig-msjEnv,cargas,conv,costoMsj,nClientes:db.clientes.filter(c=>c.pubId===pid).length};
 }
 function comisionCliente(cid,ini,fin){
@@ -512,10 +522,19 @@ function renderPubs(){
       <td class="num">${int(s.cargas)}</td>
       <td class="num convbadge ${convColor(s.conv,p.conversion)}">${s.conv?s.conv.toFixed(1)+'%':'—'}</td>
       <td class="num">${money(s.fondeado)}</td>
-      <td class="num neg">${money(s.costoMsj)}</td>
+      <td class="num">${money(s.costoMsj)}</td>
       <td class="num"><button class="iconbtn" onclick="openPub('${p.id}')">✎</button><button class="iconbtn" onclick="delPub('${p.id}')">🗑</button></td>
     </tr>`;}).join('');
-  document.getElementById('tblPubs').innerHTML=`<thead><tr><th>Publicista</th><th class="num">$/msj</th><th class="num">Conv. aseg.</th><th class="num">Debe</th><th class="num">Metió</th><th class="num">Restan</th><th class="num">Cargas</th><th class="num">Conv. real</th><th class="num">Fondeado</th><th class="num">Costo msjs</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=11 class=empty>Sin publicistas</td></tr>'}</tbody>`;
+  document.getElementById('tblPubs').innerHTML=`<thead><tr><th>Publicista</th><th class="num">$/msj</th><th class="num">Conv. aseg.</th><th class="num">Debe</th><th class="num">Metió</th><th class="num">Restan</th><th class="num">Cargas</th><th class="num">Conv. real</th><th class="num">Fondeado</th><th class="num">Gastado</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=11 class=empty>Sin publicistas</td></tr>'}</tbody>`;
+  // detalle por cliente: debe (desde fondeos) vs metió (desde cierres)
+  const det=[];
+  db.publicistas.forEach(p=>{const byC={};
+    db.fondeos.filter(f=>entryPub(f)===p.id).forEach(f=>{const k=f.clienteId;byC[k]=byC[k]||{debe:0,metio:0};byC[k].debe+=fonMsjDebe(f);});
+    db.diaria.filter(e=>entryPub(e)===p.id).forEach(e=>{const k=e.clienteId;byC[k]=byC[k]||{debe:0,metio:0};byC[k].metio+=(+e.msjEnv||0);});
+    Object.entries(byC).forEach(([cid,v])=>det.push({pub:p.nombre,cli:cli(cid)?.nombre||'—',debe:v.debe,metio:v.metio}));
+  });
+  const detRows=det.sort((a,b)=>(b.debe-b.metio)-(a.debe-a.metio)).map(d=>`<tr><td>${d.pub}</td><td><b>${d.cli}</b></td><td class="num blu">${int(d.debe)}</td><td class="num">${int(d.metio)}</td><td class="num ${(d.debe-d.metio)>0?'warn':''}">${int(d.debe-d.metio)}</td></tr>`).join('');
+  document.getElementById('tblPubDetalle').innerHTML=`<thead><tr><th>Publicista</th><th>Cliente</th><th class="num">Debe</th><th class="num">Metió</th><th class="num">Restan</th></tr></thead><tbody>${detRows||'<tr><td colspan=5 class=empty>Cargá fondeos para ver cuántos mensajes debe cada publicista por cliente</td></tr>'}</tbody>`;
 }
 
 /* ---------------- diaria ---------------- */
@@ -523,20 +542,36 @@ function renderDiaria(){
   const f=document.getElementById('fDiaCliente').value;
   let list=[...db.diaria].sort((a,b)=>b.fecha.localeCompare(a.fecha));
   if(f)list=list.filter(x=>x.clienteId===f);
-  const rows=list.map(e=>{const c=cli(e.clienteId);const p=pub(entryPub(e));const restan=(+e.msjAsig||0)-(+e.msjEnv||0);const conv=e.msjEnv?(+e.cargas||0)/e.msjEnv*100:0;
-    const cur=(e.moneda==='ARS')?'PES':'USD';const rawG=(e.gasto!==undefined&&e.gasto!=='')?e.gasto:(e.monto??e.montoUSD??0);const gastoDisp=e.moneda?money(rawG,cur):money(rawG);
+  // tarjetas de presupuesto (fondeado vs gastado) según el filtro
+  let fondeado=0,gastado=0;
+  const clis=f?[f]:db.clientes.map(c=>c.id);
+  clis.forEach(id=>{const s=clienteStats(id);fondeado+=s.fondeado;gastado+=s.invertido;});
+  const sobrante=fondeado-gastado;
+  document.getElementById('diariaCards').innerHTML=[
+    ['Fondeado (USDT)',money(fondeado),''],
+    ['Gastado (USDT)',money(gastado),''],
+    [sobrante>=0?'Presupuesto sobrante':'Gastó de más',money(Math.abs(sobrante)),sobrante>=0?'pos':'neg']
+  ].map(([l,v,cl])=>`<div class="card"><div class="lbl">${l}</div><div class="val small ${cl}">${v}</div></div>`).join('');
+  const rows=list.map(e=>{const c=cli(e.clienteId);const p=pub(entryPub(e));const conv=e.msjEnv?(+e.cargas||0)/e.msjEnv*100:0;
+    const debe=db.fondeos.filter(f=>f.clienteId===e.clienteId&&entryPub(f)===entryPub(e)).reduce((s,f)=>s+fonMsjDebe(f),0);
+    const totMetio=db.diaria.filter(x=>x.clienteId===e.clienteId&&entryPub(x)===entryPub(e)).reduce((s,x)=>s+(+x.msjEnv||0),0);
+    const restan=debe-totMetio;
+    const aseg=p?+p.conversion||0:0;const rend=aseg>0?conv/aseg*100:null;
+    const gUSD=diaGasto(e);let gastoDisp;
+    if(e.gastoAuto){gastoDisp=money(gUSD)+' <span class="muted" style="font-size:10px">auto</span>';}
+    else{const cur=(e.moneda==='ARS')?'PES':'USD';const rawG=(e.gasto!==undefined&&e.gasto!=='')?e.gasto:(e.monto??e.montoUSD??0);gastoDisp=e.moneda?money(rawG,cur):money(rawG);}
     return `<tr>
       <td>${e.fecha}</td><td>${c?.nombre||'—'}</td><td class="muted">${p?p.nombre:'—'}</td>
       <td class="num">${gastoDisp}</td>
       <td class="num pur">${e.pillin?money(diaPillin(e)):'—'}</td>
-      <td class="num">${int(e.msjAsig)}</td><td class="num">${int(e.msjEnv)}</td>
-      <td class="num ${restan>0?'warn':''}">${int(restan)}</td>
+      <td class="num blu">${int(debe)}</td><td class="num">${int(e.msjEnv)}</td>
+      <td class="num ${restan>0?'warn':(restan<0?'neg':'')}">${int(restan)}</td>
       <td class="num">${int(e.cargas)}</td>
-      <td class="num ${convColor(conv,p?p.conversion:0)}">${conv?conv.toFixed(1)+'%':'—'}</td>
-      <td class="muted">${e.linea||'—'}</td>
+      <td class="num ${convColor(conv,aseg)}">${conv?conv.toFixed(1)+'%':'—'}</td>
+      <td class="num ${rend!=null?(rend>=100?'pos':(rend>=80?'warn':'neg')):''}">${rend!=null?rend.toFixed(0)+'%':'—'}</td>
       <td class="num"><button class="iconbtn" onclick="openDiaria('${e.id}')">✎</button><button class="iconbtn" onclick="delDiaria('${e.id}')">🗑</button></td>
     </tr>`;}).join('');
-  document.getElementById('tblDiaria').innerHTML=`<thead><tr><th>Fecha</th><th>Cliente</th><th>Publicista</th><th class="num">Gastó</th><th class="num">Gan. Pillín</th><th class="num">Debe</th><th class="num">Metió</th><th class="num">Restan</th><th class="num">Cargas</th><th class="num">Conv.</th><th>Línea</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=12 class=empty>Sin cierres. Cargá el cierre diario de un cliente.</td></tr>'}</tbody>`;
+  document.getElementById('tblDiaria').innerHTML=`<thead><tr><th>Fecha</th><th>Cliente</th><th>Publicista</th><th class="num">Gastó</th><th class="num">Gan. Pillín</th><th class="num">Debe</th><th class="num">Metió</th><th class="num">Restan</th><th class="num">Cargas</th><th class="num">Conv.</th><th class="num">Rend.</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=12 class=empty>Sin cierres. Cargá el cierre diario de un cliente.</td></tr>'}</tbody>`;
 }
 
 /* ---------------- wallet ---------------- */
@@ -687,20 +722,21 @@ function savePub(id){const o={nombre:val('mNombre'),costoMsj:+val('mCosto')||0,c
 function delPub(id){if(confirm('¿Borrar publicista?')){db.publicistas=db.publicistas.filter(p=>p.id!==id);save();renderAll();}}
 
 function openDiaria(id){const e=id?db.diaria.find(x=>x.id===id):{fecha:today(),clienteId:db.clientes[0]?.id||'',pubId:'',gasto:'',moneda:'ARS',msjAsig:'',msjEnv:'',cargas:'',linea:'',pillin:false};
-  const gVal=(e.gasto??e.monto??e.montoUSD??'');const mon=e.moneda||(e.montoUSD?'USDT':'ARS');
+  const gVal=(e.gasto??e.monto??e.montoUSD??'');const mon=e.moneda||(e.montoUSD?'USDT':'ARS');const auto=id?(e.gastoAuto===true):true;
   openModal(`<h3>${id?'Editar':'Nuevo'} cierre diario</h3>
     <div class="row2"><div class="field"><label>Fecha</label><input id="mFecha" type="date" value="${e.fecha}"></div><div class="field"><label>Cliente</label><select id="mCliente">${cliOptions(e.clienteId)}</select></div></div>
     <div class="field"><label>Publicista (vacío = el del cliente)</label><select id="mPub"><option value="">— usar el del cliente —</option>${pubOptions(e.pubId)}</select></div>
-    <div class="row2"><div class="field"><label>Cuánto gastó ese día</label><input id="mMonto" type="number" step="0.01" value="${gVal}"></div><div class="field"><label>Moneda</label><select id="mMoneda"><option value="USDT" ${mon==='USDT'?'selected':''}>USDT</option><option value="ARS" ${mon==='ARS'?'selected':''}>ARS</option></select></div></div>
-    <div class="field"><label style="display:flex;align-items:center"><input type="checkbox" id="mPillin" style="width:auto;margin-right:6px" ${e.pillin?'checked':''}>Es cuenta Pillín — el 50% de lo gastado es ganancia inmediata</label></div>
-    <div class="row3">
-      <div class="field"><label>Msjs que debe</label><input id="mAsig" type="number" value="${e.msjAsig||''}"></div>
+    <div class="row2">
       <div class="field"><label>Msjs metidos</label><input id="mEnv" type="number" value="${e.msjEnv||''}"></div>
       <div class="field"><label>Cargas (depósitos)</label><input id="mCargas" type="number" value="${e.cargas||''}"></div>
     </div>
+    <div class="field"><label style="display:flex;align-items:center"><input type="checkbox" id="mAuto" style="width:auto;margin-right:6px" ${auto?'checked':''} onchange="toggleGastoAuto()">Calcular gasto automático (msjs metidos × costo del publicista)</label></div>
+    <div class="row2" id="gastoManual" style="display:${auto?'none':'grid'}"><div class="field"><label>Gasto manual</label><input id="mMonto" type="number" step="0.01" value="${gVal}"></div><div class="field"><label>Moneda</label><select id="mMoneda"><option value="USDT" ${mon==='USDT'?'selected':''}>USDT</option><option value="ARS" ${mon==='ARS'?'selected':''}>ARS</option></select></div></div>
+    <div class="field"><label style="display:flex;align-items:center"><input type="checkbox" id="mPillin" style="width:auto;margin-right:6px" ${e.pillin?'checked':''}>Es cuenta Pillín — el 50% de lo gastado es ganancia inmediata</label></div>
     <div class="field"><label>Línea / BM (opcional)</label><input id="mLinea" value="${e.linea||''}" placeholder="Línea 1, BM2k, etc."></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="saveDiaria('${id||''}')">Guardar</button></div>`);}
-function saveDiaria(id){const o={fecha:val('mFecha'),clienteId:val('mCliente'),pubId:val('mPub'),gasto:+val('mMonto')||0,moneda:val('mMoneda'),msjAsig:+val('mAsig')||0,msjEnv:+val('mEnv')||0,cargas:+val('mCargas')||0,linea:val('mLinea'),pillin:document.getElementById('mPillin').checked};if(!o.clienteId){alert('Elegí cliente');return;}if(id){const t=db.diaria.find(x=>x.id===id);delete t.montoUSD;delete t.monto;Object.assign(t,o);}else{o.id=uid();db.diaria.push(o);}save();closeModal();renderAll();}
+function toggleGastoAuto(){document.getElementById('gastoManual').style.display=document.getElementById('mAuto').checked?'none':'grid';}
+function saveDiaria(id){const auto=document.getElementById('mAuto').checked;const o={fecha:val('mFecha'),clienteId:val('mCliente'),pubId:val('mPub'),gastoAuto:auto,gasto:auto?0:(+val('mMonto')||0),moneda:auto?'USDT':val('mMoneda'),msjEnv:+val('mEnv')||0,cargas:+val('mCargas')||0,linea:val('mLinea'),pillin:document.getElementById('mPillin').checked};if(!o.clienteId){alert('Elegí cliente');return;}if(id){const t=db.diaria.find(x=>x.id===id);delete t.montoUSD;delete t.monto;Object.assign(t,o);}else{o.id=uid();db.diaria.push(o);}save();closeModal();renderAll();}
 function delDiaria(id){if(confirm('¿Borrar entrada?')){db.diaria=db.diaria.filter(x=>x.id!==id);save();renderAll();}}
 
 /* ---------------- fondeos ---------------- */
@@ -716,8 +752,15 @@ function renderFondeos(){
     ['Tu costo real (USDT)',money(costo)]
   ].map(([l,v])=>`<div class="card"><div class="lbl">${l}</div><div class="val small">${v}</div></div>`).join('');
   const rows=list.map(x=>{const c=cli(x.clienteId);const p=pub(x.pubId||(c?c.pubId:''));const cur=x.moneda==='ARS'?'PES':'USD';
-    return `<tr><td>${x.fecha}</td><td>${c?.nombre||'—'}</td><td class="muted">${p?p.nombre:'—'}</td><td class="num">${money(x.monto,cur)}</td><td>${x.pillin?'<span class="chip" style="color:var(--purple)">Pillín</span>':''}</td><td class="num"><button class="iconbtn" onclick="openFondeo('${x.id}')">✎</button><button class="iconbtn" onclick="delFondeo('${x.id}')">🗑</button></td></tr>`;}).join('');
-  document.getElementById('tblFondeos').innerHTML=`<thead><tr><th>Fecha</th><th>Cliente</th><th>Publicista</th><th class="num">Cargado</th><th>Pillín</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=6 class=empty>Sin fondeos. Registrá lo que cargás a las cuentas.</td></tr>'}</tbody>`;
+    const cm=p?+p.costoMsj||0:0;const cv=p?+p.conversion||0:0;
+    const msjDebe=cm>0?Math.round(fonMonto(x)/cm):null;
+    const cargasMin=(msjDebe!=null&&cv>0)?Math.round(msjDebe*cv/100):null;
+    return `<tr><td>${x.fecha}</td><td>${c?.nombre||'—'}</td><td class="muted">${p?p.nombre:'—'}</td><td class="num">${money(x.monto,cur)}</td>
+      <td class="num blu">${msjDebe!=null?int(msjDebe):'—'}</td>
+      <td class="num">${cargasMin!=null?int(cargasMin):'—'}</td>
+      <td>${x.pillin?'<span class="chip" style="color:var(--purple)">Pillín</span>':''}</td>
+      <td class="num"><button class="iconbtn" onclick="openFondeo('${x.id}')">✎</button><button class="iconbtn" onclick="delFondeo('${x.id}')">🗑</button></td></tr>`;}).join('');
+  document.getElementById('tblFondeos').innerHTML=`<thead><tr><th>Fecha</th><th>Cliente</th><th>Publicista</th><th class="num">Cargado</th><th class="num">Msj a meter</th><th class="num">Cargas mín</th><th>Pillín</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=8 class=empty>Sin fondeos. Registrá lo que cargás a las cuentas.</td></tr>'}</tbody>`;
 }
 function openFondeo(id){const e=id?db.fondeos.find(x=>x.id===id):{fecha:today(),clienteId:db.clientes[0]?.id||'',pubId:'',monto:'',moneda:'ARS',pillin:false};
   openModal(`<h3>${id?'Editar':'Nuevo'} fondeo</h3>
