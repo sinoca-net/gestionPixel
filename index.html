@@ -203,15 +203,6 @@
     <div class="card" style="padding:0"><table id="tblWallet"></table></div>
   </section>
 
-  <!-- TESORERÍA -->
-  <section class="view" id="view-tesoreria">
-    <h2>Tesorería · flujo de plata</h2>
-    <div class="hint">De la plata de los clientes: cuánto te fondearon <b>a vos</b>, cuánto <b>pasaste a los publicistas</b> y cuánto estás <b>administrando vos</b> (float). Abajo, por publicista: lo que le pasaste vs lo que gastó = lo que le queda en mano. La ganancia Pillín se ve en su solapa aparte.</div>
-    <div class="grid cards" id="tesoCards"></div>
-    <div style="height:14px"></div>
-    <div class="card" style="padding:0"><table id="tblTeso"></table></div>
-  </section>
-
   <!-- RENDIMIENTO -->
   <section class="view" id="view-rend">
     <h2>Rendimiento</h2>
@@ -487,7 +478,7 @@ function pnl(){
 }
 
 /* ---------------- nav ---------------- */
-const TABS=[["dash","Resumen"],["caja","Caja"],["clientes","Clientes"],["publicistas","Publicistas"],["fondeos","Fondeos"],["diaria","Diaria"],["pillin","Pillín"],["wallet","Wallet"],["tesoreria","Tesorería"],["rend","Rendimiento"],["cobro","Cobro"],["retiros","Retiros"],["config","Config"]];
+const TABS=[["dash","Resumen"],["caja","Caja"],["clientes","Clientes"],["publicistas","Publicistas"],["fondeos","Fondeos"],["diaria","Diaria"],["pillin","Pillín"],["wallet","Wallet"],["rend","Rendimiento"],["cobro","Cobro"],["retiros","Retiros"],["config","Config"]];
 function buildNav(){document.getElementById('nav').innerHTML=TABS.map(([id,l],i)=>`<button data-v="${id}" class="${i===0?'active':''}" onclick="go('${id}')">${l}</button>`).join('');}
 function go(v){document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));document.getElementById('view-'+v).classList.add('active');renderAll();}
 
@@ -788,36 +779,22 @@ function renderFondeos(){
       <td class="num blu">${msjDebe!=null?int(msjDebe):'—'}</td>
       <td class="num">${cargasMin!=null?int(cargasMin):'—'}</td>
       <td class="num pur">${x.pillin?money(fonPillin(x)):'—'}</td>
+      <td>${(x.origen||'mia')==='cliente'?'<span class="chip" style="color:var(--gold)">cliente</span>':'<span class="muted" style="font-size:11px">mi plata</span>'}</td>
       <td>${x.pillin?'<span class="chip" style="color:var(--purple)">Pillín</span>':''}</td>
       <td class="num"><button class="iconbtn" onclick="openFondeo('${x.id}')">✎</button><button class="iconbtn" onclick="delFondeo('${x.id}')">🗑</button></td></tr>`;}).join('');
-  document.getElementById('tblFondeos').innerHTML=`<thead><tr><th>Fecha</th><th>Cliente</th><th>Publicista</th><th class="num">Cargado</th><th class="num">Msj a meter</th><th class="num">Cargas mín</th><th class="num">Gan. Pillín</th><th>Pillín</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=9 class=empty>Sin fondeos. Registrá lo que cargás a las cuentas.</td></tr>'}</tbody>`;
+  document.getElementById('tblFondeos').innerHTML=`<thead><tr><th>Fecha</th><th>Cliente</th><th>Publicista</th><th class="num">Cargado</th><th class="num">Msj a meter</th><th class="num">Cargas mín</th><th class="num">Gan. Pillín</th><th>Origen</th><th>Pillín</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=10 class=empty>Sin fondeos. Registrá lo que cargás a las cuentas.</td></tr>'}</tbody>`;
 }
-function openFondeo(id){const e=id?db.fondeos.find(x=>x.id===id):{fecha:today(),clienteId:db.clientes[0]?.id||'',pubId:'',monto:'',moneda:'ARS',pillin:false};
+function openFondeo(id){const e=id?db.fondeos.find(x=>x.id===id):{fecha:today(),clienteId:db.clientes[0]?.id||'',pubId:'',monto:'',moneda:'ARS',pillin:false,origen:'mia'};
+  const org=e.origen||'mia';
   openModal(`<h3>${id?'Editar':'Nuevo'} fondeo</h3>
     <div class="row2"><div class="field"><label>Fecha</label><input id="mFecha" type="date" value="${e.fecha}"></div><div class="field"><label>Cliente</label><select id="mCliente">${cliOptions(e.clienteId)}</select></div></div>
     <div class="field"><label>Publicista (vacío = el del cliente)</label><select id="mPub"><option value="">— usar el del cliente —</option>${pubOptions(e.pubId)}</select></div>
     <div class="row2"><div class="field"><label>Cargado en cuenta</label><input id="mMonto" type="number" step="0.01" value="${e.monto||''}"></div><div class="field"><label>Moneda</label><select id="mMoneda"><option value="USDT" ${e.moneda==='USDT'?'selected':''}>USDT</option><option value="ARS" ${(e.moneda||'ARS')==='ARS'?'selected':''}>ARS</option></select></div></div>
+    <div class="field"><label>¿De dónde sale la plata?</label><select id="mOrigen"><option value="mia" ${org==='mia'?'selected':''}>De mi plata (sale de tu float)</option><option value="cliente" ${org==='cliente'?'selected':''}>El cliente lo puso directo (no toca tu float)</option></select></div>
     <div class="field"><label style="display:flex;align-items:center"><input type="checkbox" id="mPillin" style="width:auto;margin-right:6px" ${e.pillin?'checked':''}>Cargado con Pillín (pagás la mitad)</label></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="saveFondeo('${id||''}')">Guardar</button></div>`);}
-function saveFondeo(id){const o={fecha:val('mFecha'),clienteId:val('mCliente'),pubId:val('mPub'),monto:+val('mMonto')||0,moneda:val('mMoneda'),pillin:document.getElementById('mPillin').checked};if(!o.clienteId||!o.monto){alert('Completá cliente y monto');return;}if(id){Object.assign(db.fondeos.find(x=>x.id===id),o);}else{o.id=uid();db.fondeos.push(o);}save();closeModal();renderAll();}
+function saveFondeo(id){const o={fecha:val('mFecha'),clienteId:val('mCliente'),pubId:val('mPub'),monto:+val('mMonto')||0,moneda:val('mMoneda'),origen:val('mOrigen'),pillin:document.getElementById('mPillin').checked};if(!o.clienteId||!o.monto){alert('Completá cliente y monto');return;}if(id){Object.assign(db.fondeos.find(x=>x.id===id),o);}else{o.id=uid();db.fondeos.push(o);}save();closeModal();renderAll();}
 function delFondeo(id){if(confirm('¿Borrar fondeo?')){db.fondeos=db.fondeos.filter(x=>x.id!==id);save();renderAll();}}
-
-/* ---------------- tesorería ---------------- */
-function renderTesoreria(){
-  const entro=db.ingresos.reduce((s,x)=>s+ingresoUSD(x),0);
-  const pasado=db.fondeos.reduce((s,f)=>s+fonMonto(f),0);
-  const flo=entro-pasado;
-  document.getElementById('tesoCards').innerHTML=[
-    ['Fondeado por clientes (a vos)',money(entro),''],
-    ['Pasado a publicistas',money(pasado),''],
-    ['En tu poder (float)',money(flo),flo>=0?'pos':'neg']
-  ].map(([l,v,c])=>`<div class="card"><div class="lbl">${l}</div><div class="val small ${c}">${v}</div></div>`).join('');
-  const rows=db.publicistas.map(p=>{const s=pubStats(p.id);const queda=s.fondeado-s.gastado;
-    if(s.fondeado===0&&s.gastado===0)return '';
-    return `<tr><td><b>${p.nombre}</b></td><td class="num">${money(s.fondeado)}</td><td class="num">${money(s.gastado)}</td><td class="num ${queda>=0?'pos':'neg'}">${money(queda)}</td></tr>`;
-  }).filter(Boolean).join('');
-  document.getElementById('tblTeso').innerHTML=`<thead><tr><th>Publicista</th><th class="num">Le pasaste</th><th class="num">Gastó</th><th class="num">Le queda en mano</th></tr></thead><tbody>${rows||'<tr><td colspan=4 class=empty>Sin movimientos todavía</td></tr>'}</tbody>`;
-}
 
 /* ---------------- pillín ---------------- */
 function renderPillin(){
@@ -873,7 +850,7 @@ function renderAll(){
   fillSel(document.getElementById('fDiaCliente'),'Todos los clientes');
   fillSel(document.getElementById('fWalCliente'),'Todos los clientes');
   fillSel(document.getElementById('fFonCliente'),'Todos los clientes');
-  renderDash();renderCaja();renderClientes();renderPubs();renderFondeos();renderDiaria();renderPillin();renderWallet();renderTesoreria();renderRend();renderCobro();renderRetiros();loadConfig();
+  renderDash();renderCaja();renderClientes();renderPubs();renderFondeos();renderDiaria();renderPillin();renderWallet();renderRend();renderCobro();renderRetiros();loadConfig();
 }
 initSupabase();
 </script>
