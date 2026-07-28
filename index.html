@@ -109,7 +109,7 @@
         <h2>Ganancia</h2>
         <div class="card" id="pnlBox"></div>
         <div class="hint" style="margin-top:14px">
-          Tu <b>ganancia total (USDT)</b> = (ingresos − egresos de caja) + <b>ganancia Pillín</b> (50% de lo cargado con duplicación). Los <b>retiros</b> NO afectan la ganancia. La <b>plata actual</b> = ganancia total − retiros, todo unificado en USDT al TC de Config.
+          Tu <b>ganancia total (USDT)</b> = <b>comisiones</b> (10% de lo invertido / $ por carga) + <b>ganancia Pillín</b> − <b>gastos</b> (BM/API/bm2k). Lo que el cliente fondea y lo que pasás a publicistas NO cuenta como ganancia (es plata que va a pauta). Los <b>retiros</b> tampoco afectan la ganancia. La <b>plata actual</b> = ganancia total − retiros.
         </div>
       </div>
       <div>
@@ -128,7 +128,7 @@
       <button class="btn sm" onclick="openCajaMov('ingreso')">+ Ingreso</button>
       <button class="btn ghost sm" onclick="openCajaMov('egreso')">+ Egreso</button>
     </div>
-    <div class="hint">Arriba: la <b>plata actual</b> que debería haber ahora (ganancia histórica − retiros). Abajo: los movimientos del mes con su cierre. Filtrá por mes arriba a la derecha.</div>
+    <div class="hint">Arriba: la <b>plata actual</b> que debería haber (ganancia − retiros). Abajo: tus movimientos de plata del mes (referencia). Ojo: los ingresos de acá son solo registro de caja — tu ganancia sale de las comisiones, no de lo que fondean los clientes. Usá los egresos para tus gastos reales (BM/API/bm2k).</div>
     <div class="sub-h">Plata actual · lo que debería haber</div>
     <div class="grid cards" id="cajaActual"></div>
     <div class="sub-h">Movimientos del mes</div>
@@ -147,7 +147,7 @@
   <!-- PUBLICISTAS -->
   <section class="view" id="view-publicistas">
     <div class="toolbar"><h2 style="margin:0">Publicistas</h2><div class="spacer"></div><button class="btn sm" onclick="openPub()">+ Nuevo publicista</button></div>
-    <div class="hint">Costo por mensaje, conversión y rendimiento asegurados vs. reales. El <b>DEBE</b> se sincroniza solo con lo que fondeaste (fondeo ÷ costo del msj). Abajo, el detalle de cuántos mensajes debe por cada cliente.</div>
+    <div class="hint">Costo por mensaje, conversión y rendimiento. Para los que no cobran fijo (Santi, vos…), el <b>$/msj</b> se calcula solo: gasto real de los cierres ÷ mensajes metidos (aparece con "real"). El <b>DEBE</b> se sincroniza con lo fondeado ÷ esa tarifa. Abajo, el detalle por cliente.</div>
     <div class="card" style="padding:0"><table id="tblPubs"></table></div>
     <div class="sub-h">Detalle por cliente · mensajes que debe</div>
     <div class="card" style="padding:0"><table id="tblPubDetalle"></table></div>
@@ -203,6 +203,15 @@
     <div class="card" style="padding:0"><table id="tblWallet"></table></div>
   </section>
 
+  <!-- TESORERÍA -->
+  <section class="view" id="view-tesoreria">
+    <h2>Tesorería · flujo de plata</h2>
+    <div class="hint">De la plata de los clientes: cuánto te fondearon <b>a vos</b>, cuánto <b>pasaste a los publicistas</b> y cuánto estás <b>administrando vos</b> (float). Abajo, por publicista: lo que le pasaste vs lo que gastó = lo que le queda en mano. La ganancia Pillín se ve en su solapa aparte.</div>
+    <div class="grid cards" id="tesoCards"></div>
+    <div style="height:14px"></div>
+    <div class="card" style="padding:0"><table id="tblTeso"></table></div>
+  </section>
+
   <!-- RENDIMIENTO -->
   <section class="view" id="view-rend">
     <h2>Rendimiento</h2>
@@ -215,13 +224,19 @@
     <div class="card" style="padding:0"><table id="tblRendLinea"></table></div>
   </section>
 
-  <!-- COBRO SEMANAL -->
+  <!-- COBRO POR PERÍODO -->
   <section class="view" id="view-cobro">
     <div class="toolbar">
-      <h2 style="margin:0">Cobro semanal</h2><div class="spacer"></div>
-      <div class="weekpick"><button class="btn ghost sm" onclick="shiftWeek(-1)">◀</button><span id="weekLabel" class="muted"></span><button class="btn ghost sm" onclick="shiftWeek(1)">▶</button></div>
+      <h2 style="margin:0">Cobro por período</h2><div class="spacer"></div>
+      <button class="btn ghost sm" onclick="cobroPreset('semana')">Semana</button>
+      <button class="btn ghost sm" onclick="cobroPreset('mes')">Mes</button>
+      <input type="date" id="cobroDesde" onchange="renderCobro()">
+      <span class="muted">→</span>
+      <input type="date" id="cobroHasta" onchange="renderCobro()">
+      <button class="btn ghost sm" onclick="shiftPeriodo(-1)">◀</button>
+      <button class="btn ghost sm" onclick="shiftPeriodo(1)">▶</button>
     </div>
-    <div class="hint">Cierre de la semana elegida. Calcula lo que le cobrás a cada cliente: 10% de lo invertido esa semana, o $ por cada carga (depósito) generada.</div>
+    <div class="hint">Elegí el período: <b>Semana</b>, <b>Mes</b>, o fechas personalizadas (desde/hasta). Con las flechas ◀▶ movés el período completo. Calcula la comisión a cobrar: 10% de lo fondeado en ese rango, o $ por carga.</div>
     <div class="grid cards" id="cobroCards"></div>
     <div style="height:14px"></div>
     <div class="card" style="padding:0"><table id="tblCobro"></table></div>
@@ -330,7 +345,9 @@ async function doLogout(){if(sb){try{await sb.auth.signOut();}catch(e){}}locatio
 async function afterLogin(){
   hideOverlays();
   await loadFromCloud();
-  buildNav();document.getElementById('cajaMonth').value=today().slice(0,7);renderAll();
+  buildNav();document.getElementById('cajaMonth').value=today().slice(0,7);
+  const _cr=cobroRange('semana');document.getElementById('cobroDesde').value=_cr.ini;document.getElementById('cobroHasta').value=_cr.fin;
+  renderAll();
   if(!realtimeReady){realtimeReady=true;
     try{sb.channel('app_state_ch').on('postgres_changes',{event:'*',schema:'public',table:'app_state'},p=>{if(p.new&&p.new.data){db=p.new.data;normalize();localStorage.setItem(LS,JSON.stringify(db));renderAll();}}).subscribe();}catch(e){}
   }
@@ -421,10 +438,13 @@ function clienteStats(cid){
   const conv=msjEnv?cargas/msjEnv*100:0;
   return {cargado,invertido,fondeado,sobrante:fondeado-invertido,gainPillin,saldo:cargado-invertido,msjAsig,msjEnv,restan:msjAsig-msjEnv,cargas,conv};
 }
-// msjs a meter para un fondeo, según el costo del publicista
-function fonMsjDebe(f){const p=pub(entryPub(f));const cm=p?+p.costoMsj||0:0;return cm>0?Math.round(fonMonto(f)/cm):0;}
+// costo por mensaje EFECTIVO de un publicista = gasto real de sus cierres ÷ msjs metidos
+function pubEffCost(pid){const dia=db.diaria.filter(e=>entryPub(e)===pid);const g=dia.reduce((s,x)=>s+diaGasto(x),0);const m=dia.reduce((s,x)=>s+(+x.msjEnv||0),0);return m>0?g/m:0;}
+// tarifa por msj: la fija del publicista, o si no tiene, la efectiva calculada de los cierres
+function pubTarifa(pid){const p=pub(pid);const cm=p?+p.costoMsj||0:0;return cm>0?cm:pubEffCost(pid);}
+// msjs a meter para un fondeo, según la tarifa del publicista
+function fonMsjDebe(f){const cm=pubTarifa(entryPub(f));return cm>0?Math.round(fonMonto(f)/cm):0;}
 function pubStats(pid){
-  const p=pub(pid);const cm=p?+p.costoMsj||0:0;
   const fons=db.fondeos.filter(f=>entryPub(f)===pid);
   const fondeado=fons.reduce((s,f)=>s+fonMonto(f),0);
   const msjAsig=fons.reduce((s,f)=>s+fonMsjDebe(f),0);        // DEBE = suma de msj a meter de sus fondeos
@@ -432,39 +452,42 @@ function pubStats(pid){
   const msjEnv=dia.reduce((s,x)=>s+(+x.msjEnv||0),0);
   const cargas=dia.reduce((s,x)=>s+(+x.cargas||0),0);
   const conv=msjEnv?cargas/msjEnv*100:0;
-  const costoMsj=msjEnv*cm;
-  return {fondeado,msjAsig,msjEnv,restan:msjAsig-msjEnv,cargas,conv,costoMsj,nClientes:db.clientes.filter(c=>c.pubId===pid).length};
+  const gastado=dia.reduce((s,x)=>s+diaGasto(x),0);          // gasto REAL de los cierres
+  const costoReal=msjEnv>0?gastado/msjEnv:0;                 // $/msj efectivo
+  const p=pub(pid);const costoFijo=p?+p.costoMsj||0:0;
+  return {fondeado,msjAsig,msjEnv,restan:msjAsig-msjEnv,cargas,conv,gastado,costoReal,costoFijo,nClientes:db.clientes.filter(c=>c.pubId===pid).length};
 }
 function comisionCliente(cid,ini,fin){
   const c=cli(cid); if(!c)return 0;
   const inRange=x=>(!ini||x.fecha>=ini)&&(!fin||x.fecha<=fin);
   if(c.modelo==='pct'){
-    const inv=db.diaria.filter(x=>x.clienteId===cid&&inRange(x)).reduce((s,x)=>s+diaGasto(x),0);
-    return inv*(c.pct/100);
+    // 10% de lo FONDEADO al cliente (suma a medida que fondeás)
+    const fon=db.fondeos.filter(x=>x.clienteId===cid&&inRange(x)).reduce((s,x)=>s+fonMonto(x),0);
+    return fon*(c.pct/100);
   }else{
     const nCargas=db.diaria.filter(x=>x.clienteId===cid&&inRange(x)).reduce((s,x)=>s+(+x.cargas||0),0);
     return (nCargas*(c.porCarga||0))/(db.config.tc||1);
   }
 }
 
-/* ---------------- Ganancia (Caja + Pillín) ---------------- */
+/* ---------------- Ganancia (Comisión + Pillín − Gastos) ---------------- */
 function pnl(){
   let iU=0,iA=0,eU=0,eA=0;
   db.caja.forEach(m=>{if(m.tipo==='ingreso'){iU+=+m.usdt||0;iA+=+m.ars||0;}else{eU+=+m.usdt||0;eA+=+m.ars||0;}});
   let rU=0,rA=0;
   db.retiros.forEach(r=>{if((r.moneda||'USDT')==='ARS')rA+=+r.monto||0;else rU+=+r.monto||0;});
   let pil=0; db.fondeos.forEach(f=>pil+=fonPillin(f));
+  let com=0; db.clientes.forEach(c=>com+=comisionCliente(c.id));   // comisiones (10% de lo invertido / $ por carga), en USD
   const tc=db.config.tc||1;
-  const profU=iU-eU, profA=iA-eA;
-  const cajaUni=profU+profA/tc;      // ganancia de caja unificada en USDT
-  const ganTotal=cajaUni+pil;        // + ganancia Pillín
+  const gastos=eU+eA/tc;                    // gastos reales = egresos de la Caja (BM/API/bm2k)
+  const ganTotal=com+pil-gastos;            // ganancia = comisiones + Pillín − gastos (el fondeo NO cuenta)
   const retUni=rU+rA/tc;
-  const plataAct=ganTotal-retUni;    // plata actual que debería haber
-  return {iU,iA,eU,eA,profU,profA,retU:rU,retA:rA,pil,tc,cajaUni,ganTotal,retUni,plataAct};
+  const plataAct=ganTotal-retUni;
+  return {iU,iA,eU,eA,com,gastos,pil,retU:rU,retA:rA,tc,ganTotal,retUni,plataAct};
 }
 
 /* ---------------- nav ---------------- */
-const TABS=[["dash","Resumen"],["caja","Caja"],["clientes","Clientes"],["publicistas","Publicistas"],["fondeos","Fondeos"],["diaria","Diaria"],["pillin","Pillín"],["wallet","Wallet"],["rend","Rendimiento"],["cobro","Cobro semanal"],["retiros","Retiros"],["config","Config"]];
+const TABS=[["dash","Resumen"],["caja","Caja"],["clientes","Clientes"],["publicistas","Publicistas"],["fondeos","Fondeos"],["diaria","Diaria"],["pillin","Pillín"],["wallet","Wallet"],["tesoreria","Tesorería"],["rend","Rendimiento"],["cobro","Cobro"],["retiros","Retiros"],["config","Config"]];
 function buildNav(){document.getElementById('nav').innerHTML=TABS.map(([id,l],i)=>`<button data-v="${id}" class="${i===0?'active':''}" onclick="go('${id}')">${l}</button>`).join('');}
 function go(v){document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));document.getElementById('view-'+v).classList.add('active');renderAll();}
 
@@ -475,18 +498,17 @@ function renderDash(){
   const p=pnl();
   document.getElementById('dashCards').innerHTML=[
     ['Ganancia total (USDT)',money(p.ganTotal),p.ganTotal>=0?'pos':'neg'],
+    ['Comisiones (USDT)',money(p.com),'pos'],
     ['Ganancia Pillín (USDT)',money(p.pil),'pur'],
     ['Plata actual (USDT)',money(p.plataAct),p.plataAct>=0?'pos':'neg'],
     ['Saldo en clientes',money(saldo),'blu'],
-    ['Invertido en pauta',money(invertido),''],
-    ['Publicistas',db.publicistas.length,'gold']
+    ['Invertido en pauta',money(invertido),'']
   ].map(([l,v,c])=>`<div class="card"><div class="lbl">${l}</div><div class="val small ${c}">${v}</div></div>`).join('');
 
   document.getElementById('pnlBox').innerHTML=`
-    <div class="pnl-line"><span>Ingresos caja</span><span class="pos">${money(p.iU)} · ${money(p.iA,'PES')}</span></div>
-    <div class="pnl-line"><span>Egresos (gastos)</span><span class="neg">− ${money(p.eU)} · ${money(p.eA,'PES')}</span></div>
-    <div class="pnl-line"><span>Ganancia caja (USDT)</span><span>${money(p.cajaUni)}</span></div>
-    <div class="pnl-line"><span>Ganancia Pillín (USDT)</span><span class="pur">+ ${money(p.pil)}</span></div>
+    <div class="pnl-line"><span>Comisiones (10% / $ por carga)</span><span class="pos">+ ${money(p.com)}</span></div>
+    <div class="pnl-line"><span>Ganancia Pillín</span><span class="pur">+ ${money(p.pil)}</span></div>
+    <div class="pnl-line"><span>Gastos (BM/API/bm2k)</span><span class="neg">− ${money(p.gastos)}</span></div>
     <div class="pnl-line total"><span>Ganancia total (USDT)</span><span class="${p.ganTotal>=0?'pos':'neg'}">${money(p.ganTotal)}</span></div>`;
 
   const rows=db.clientes.map(c=>{const s=clienteStats(c.id);const pb=pub(c.pubId);
@@ -505,26 +527,29 @@ function renderClientes(){
       <td><span class="chip">${modelo}</span></td>
       <td class="num">${int(s.cargas)}</td>
       <td class="num ${convColor(s.conv,pb?pb.conversion:0)}">${s.conv?s.conv.toFixed(1)+'%':'—'}</td>
+      <td class="num pos">${money(comisionCliente(c.id))}</td>
       <td class="num ${s.saldo>=0?'pos':'neg'}">${money(s.saldo)}</td>
       <td class="num"><button class="iconbtn" onclick="openCliente('${c.id}')">✎</button><button class="iconbtn" onclick="delCliente('${c.id}')">🗑</button></td>
     </tr>`;}).join('');
-  document.getElementById('tblClientes').innerHTML=`<thead><tr><th>Cliente</th><th>CRM</th><th>Publicista</th><th class="num">Diaria</th><th>Cobro</th><th class="num">Cargas</th><th class="num">Conv.</th><th class="num">Saldo</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=9 class=empty>Agregá tu primer cliente</td></tr>'}</tbody>`;
+  document.getElementById('tblClientes').innerHTML=`<thead><tr><th>Cliente</th><th>CRM</th><th>Publicista</th><th class="num">Diaria</th><th>Cobro</th><th class="num">Cargas</th><th class="num">Conv.</th><th class="num">Comisión</th><th class="num">Saldo</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=10 class=empty>Agregá tu primer cliente</td></tr>'}</tbody>`;
 }
 
 /* ---------------- publicistas ---------------- */
 function renderPubs(){
   const rows=db.publicistas.map(p=>{const s=pubStats(p.id);
+    const dpm = s.costoFijo>0 ? money(s.costoFijo) : (s.costoReal>0? money(s.costoReal)+' <span class="muted" style="font-size:10px">real</span>' : '—');
+    const tieneDebe=s.msjAsig>0;
     return `<tr>
       <td><b>${p.nombre}</b><div class="muted" style="font-size:11px">${p.notas||''}</div></td>
-      <td class="num">${p.costoMsj?money(p.costoMsj):'—'}</td>
+      <td class="num">${dpm}</td>
       <td class="num">${p.conversion?p.conversion+'%':'—'}</td>
-      <td class="num">${int(s.msjAsig)}</td>
+      <td class="num">${tieneDebe?int(s.msjAsig):'—'}</td>
       <td class="num">${int(s.msjEnv)}</td>
-      <td class="num ${s.restan>0?'warn':''}">${int(s.restan)}</td>
+      <td class="num ${s.restan>0?'warn':(s.restan<0?'neg':'')}">${tieneDebe?int(s.restan):'—'}</td>
       <td class="num">${int(s.cargas)}</td>
       <td class="num convbadge ${convColor(s.conv,p.conversion)}">${s.conv?s.conv.toFixed(1)+'%':'—'}</td>
       <td class="num">${money(s.fondeado)}</td>
-      <td class="num">${money(s.costoMsj)}</td>
+      <td class="num">${money(s.gastado)}</td>
       <td class="num"><button class="iconbtn" onclick="openPub('${p.id}')">✎</button><button class="iconbtn" onclick="delPub('${p.id}')">🗑</button></td>
     </tr>`;}).join('');
   document.getElementById('tblPubs').innerHTML=`<thead><tr><th>Publicista</th><th class="num">$/msj</th><th class="num">Conv. aseg.</th><th class="num">Debe</th><th class="num">Metió</th><th class="num">Restan</th><th class="num">Cargas</th><th class="num">Conv. real</th><th class="num">Fondeado</th><th class="num">Gastado</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=11 class=empty>Sin publicistas</td></tr>'}</tbody>`;
@@ -608,25 +633,28 @@ function renderRend(){
 }
 
 /* ---------------- cobro semanal ---------------- */
-let weekOffset=0;
-function weekRange(off){const d=new Date();d.setDate(d.getDate()+off*7);const day=(d.getDay()+6)%7;const mon=new Date(d);mon.setDate(d.getDate()-day);const sun=new Date(mon);sun.setDate(mon.getDate()+6);const fmt=x=>x.toISOString().slice(0,10);return {ini:fmt(mon),fin:fmt(sun)};}
-function shiftWeek(n){weekOffset+=n;renderCobro();}
+function cobroRange(p){const d=new Date();const fmt=x=>x.toISOString().slice(0,10);let a,b;
+  if(p==='mes'){a=new Date(d.getFullYear(),d.getMonth(),1);b=new Date(d.getFullYear(),d.getMonth()+1,0);}
+  else{const day=(d.getDay()+6)%7;a=new Date(d);a.setDate(d.getDate()-day);b=new Date(a);b.setDate(a.getDate()+6);}
+  return {ini:fmt(a),fin:fmt(b)};}
+function cobroPreset(p){const r=cobroRange(p);document.getElementById('cobroDesde').value=r.ini;document.getElementById('cobroHasta').value=r.fin;renderCobro();}
+function shiftPeriodo(n){const di=document.getElementById('cobroDesde'),ha=document.getElementById('cobroHasta');if(!di.value||!ha.value)return;const a=new Date(di.value),b=new Date(ha.value);const len=Math.round((b-a)/86400000)+1;a.setDate(a.getDate()+n*len);b.setDate(b.getDate()+n*len);const fmt=x=>x.toISOString().slice(0,10);di.value=fmt(a);ha.value=fmt(b);renderCobro();}
 function renderCobro(){
-  const {ini,fin}=weekRange(weekOffset);
-  document.getElementById('weekLabel').textContent=`${ini}  →  ${fin}`;
-  let totCobro=0,totInv=0;
+  const ini=document.getElementById('cobroDesde').value;
+  const fin=document.getElementById('cobroHasta').value;
+  if(!ini||!fin)return;
+  let totCobro=0,totFon=0;
   const rows=db.clientes.map(c=>{
-    const dia=db.diaria.filter(x=>x.clienteId===c.id&&x.fecha>=ini&&x.fecha<=fin);
-    const inv=dia.reduce((s,x)=>s+(+x.montoUSD||0),0);
-    const cargas=dia.reduce((s,x)=>s+(+x.cargas||0),0);
+    const fon=db.fondeos.filter(x=>x.clienteId===c.id&&x.fecha>=ini&&x.fecha<=fin).reduce((s,x)=>s+fonMonto(x),0);
+    const cargas=db.diaria.filter(x=>x.clienteId===c.id&&x.fecha>=ini&&x.fecha<=fin).reduce((s,x)=>s+(+x.cargas||0),0);
     const com=comisionCliente(c.id,ini,fin);
-    totCobro+=com;totInv+=inv;
-    if(dia.length===0)return '';
-    const modelo=c.modelo==='pct'?`${c.pct}% de ${money(inv)}`:`${int(cargas)} carga(s) × $${c.porCarga}`;
-    return `<tr><td><b>${c.nombre}</b></td><td class="muted">${modelo}</td><td class="num">${money(inv)}</td><td class="num">${int(cargas)}</td><td class="num pos">${money(com)}</td></tr>`;
+    totCobro+=com;totFon+=fon;
+    if(fon===0&&cargas===0)return '';
+    const modelo=c.modelo==='pct'?`${c.pct}% de ${money(fon)}`:`${int(cargas)} carga(s) × $${c.porCarga}`;
+    return `<tr><td><b>${c.nombre}</b></td><td class="muted">${modelo}</td><td class="num">${money(fon)}</td><td class="num">${int(cargas)}</td><td class="num pos">${money(com)}</td></tr>`;
   }).filter(Boolean).join('');
-  document.getElementById('cobroCards').innerHTML=[['Invertido en la semana',money(totInv),''],['A cobrar esta semana',money(totCobro),'pos'],['Cierre',`${ini} → ${fin}`,'muted']].map(([l,v,c])=>`<div class="card"><div class="lbl">${l}</div><div class="val small ${c}">${v}</div></div>`).join('');
-  document.getElementById('tblCobro').innerHTML=`<thead><tr><th>Cliente</th><th>Cálculo</th><th class="num">Invertido</th><th class="num">Cargas</th><th class="num">A cobrar</th></tr></thead><tbody>${rows||'<tr><td colspan=5 class=empty>Sin movimientos esta semana</td></tr>'}</tbody>`;
+  document.getElementById('cobroCards').innerHTML=[['Fondeado en la semana',money(totFon),''],['A cobrar esta semana',money(totCobro),'pos'],['Cierre',`${ini} → ${fin}`,'muted']].map(([l,v,c])=>`<div class="card"><div class="lbl">${l}</div><div class="val small ${c}">${v}</div></div>`).join('');
+  document.getElementById('tblCobro').innerHTML=`<thead><tr><th>Cliente</th><th>Cálculo</th><th class="num">Fondeado</th><th class="num">Cargas</th><th class="num">A cobrar</th></tr></thead><tbody>${rows||'<tr><td colspan=5 class=empty>Sin movimientos esta semana</td></tr>'}</tbody>`;
 }
 
 /* ---------------- retiros ---------------- */
@@ -652,7 +680,7 @@ function renderGastos(){
 function renderCaja(){
   const P=pnl();
   document.getElementById('cajaActual').innerHTML=[
-    ['Ganancia total (USDT)','<span class="'+(P.ganTotal>=0?'pos':'neg')+'">'+money(P.ganTotal)+'</span><br><span class="muted" style="font-size:11px">caja '+money(P.cajaUni)+' + Pillín '+money(P.pil)+'</span>'],
+    ['Ganancia total (USDT)','<span class="'+(P.ganTotal>=0?'pos':'neg')+'">'+money(P.ganTotal)+'</span><br><span class="muted" style="font-size:11px">comis. '+money(P.com)+' + Pillín '+money(P.pil)+' − gastos '+money(P.gastos)+'</span>'],
     ['Retiros (USDT)','<span class="gold">'+money(P.retUni)+'</span>'],
     ['Plata actual · debería haber','<span class="'+(P.plataAct>=0?'pos':'neg')+'" style="font-size:19px">'+money(P.plataAct)+'</span><br><span class="muted" style="font-size:11px">unificado @ TC '+P.tc.toLocaleString('es-AR')+'</span>']
   ].map(([l,v])=>`<div class="card"><div class="lbl">${l}</div><div class="val small">${v}</div></div>`).join('');
@@ -664,7 +692,7 @@ function renderCaja(){
   document.getElementById('cajaCards').innerHTML=[
     ['Ingresos','<span class="pos">'+money(iU)+'</span><br><span class="pos" style="font-size:13px">'+money(iA,'PES')+'</span>'],
     ['Egresos','<span class="neg">'+money(eU)+'</span><br><span class="neg" style="font-size:13px">'+money(eA,'PES')+'</span>'],
-    ['Profit (cierre)','<span class="'+((iU-eU)>=0?'pos':'neg')+'">'+money(iU-eU)+'</span><br><span class="'+((iA-eA)>=0?'pos':'neg')+'" style="font-size:13px">'+money(iA-eA,'PES')+'</span>']
+    ['Neto de movimientos','<span class="'+((iU-eU)>=0?'pos':'neg')+'">'+money(iU-eU)+'</span><br><span class="'+((iA-eA)>=0?'pos':'neg')+'" style="font-size:13px">'+money(iA-eA,'PES')+'</span>']
   ].map(([l,v])=>`<div class="card"><div class="lbl">${l}</div><div class="val small">${v}</div></div>`).join('');
   const rows=list.map(m=>`<tr>
     <td>${m.fecha}</td>
@@ -774,6 +802,23 @@ function openFondeo(id){const e=id?db.fondeos.find(x=>x.id===id):{fecha:today(),
 function saveFondeo(id){const o={fecha:val('mFecha'),clienteId:val('mCliente'),pubId:val('mPub'),monto:+val('mMonto')||0,moneda:val('mMoneda'),pillin:document.getElementById('mPillin').checked};if(!o.clienteId||!o.monto){alert('Completá cliente y monto');return;}if(id){Object.assign(db.fondeos.find(x=>x.id===id),o);}else{o.id=uid();db.fondeos.push(o);}save();closeModal();renderAll();}
 function delFondeo(id){if(confirm('¿Borrar fondeo?')){db.fondeos=db.fondeos.filter(x=>x.id!==id);save();renderAll();}}
 
+/* ---------------- tesorería ---------------- */
+function renderTesoreria(){
+  const entro=db.ingresos.reduce((s,x)=>s+ingresoUSD(x),0);
+  const pasado=db.fondeos.reduce((s,f)=>s+fonMonto(f),0);
+  const flo=entro-pasado;
+  document.getElementById('tesoCards').innerHTML=[
+    ['Fondeado por clientes (a vos)',money(entro),''],
+    ['Pasado a publicistas',money(pasado),''],
+    ['En tu poder (float)',money(flo),flo>=0?'pos':'neg']
+  ].map(([l,v,c])=>`<div class="card"><div class="lbl">${l}</div><div class="val small ${c}">${v}</div></div>`).join('');
+  const rows=db.publicistas.map(p=>{const s=pubStats(p.id);const queda=s.fondeado-s.gastado;
+    if(s.fondeado===0&&s.gastado===0)return '';
+    return `<tr><td><b>${p.nombre}</b></td><td class="num">${money(s.fondeado)}</td><td class="num">${money(s.gastado)}</td><td class="num ${queda>=0?'pos':'neg'}">${money(queda)}</td></tr>`;
+  }).filter(Boolean).join('');
+  document.getElementById('tblTeso').innerHTML=`<thead><tr><th>Publicista</th><th class="num">Le pasaste</th><th class="num">Gastó</th><th class="num">Le queda en mano</th></tr></thead><tbody>${rows||'<tr><td colspan=4 class=empty>Sin movimientos todavía</td></tr>'}</tbody>`;
+}
+
 /* ---------------- pillín ---------------- */
 function renderPillin(){
   const map={};let tC=0,tGain=0;
@@ -828,7 +873,7 @@ function renderAll(){
   fillSel(document.getElementById('fDiaCliente'),'Todos los clientes');
   fillSel(document.getElementById('fWalCliente'),'Todos los clientes');
   fillSel(document.getElementById('fFonCliente'),'Todos los clientes');
-  renderDash();renderCaja();renderClientes();renderPubs();renderFondeos();renderDiaria();renderPillin();renderWallet();renderRend();renderCobro();renderRetiros();loadConfig();
+  renderDash();renderCaja();renderClientes();renderPubs();renderFondeos();renderDiaria();renderPillin();renderWallet();renderTesoreria();renderRend();renderCobro();renderRetiros();loadConfig();
 }
 initSupabase();
 </script>
